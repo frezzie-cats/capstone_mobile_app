@@ -1,0 +1,35 @@
+
+name: capstone_mobile_app
+description: Mobile-Based Arthropod Bite and Sting Classification and Recommendation System Utilizing Machine Learning Approaches
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # Local SQLite Database
+  sqflite: ^2.3.0
+  path: ^1.8.3
+
+  # Camera functionality
+  camera: ^0.10.5+5
+
+  # Machine Learning
+  tflite_flutter: ^0.12.1
+  image: ^4.1.3
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^3.0.0
+
+flutter:
+  uses-material-design: true
+
+  assets:
+    - assets/models/stage1_mobilenetv2_binary.tflite
+    - assets/models/stage2_efficientnetb0_4class.tflite
