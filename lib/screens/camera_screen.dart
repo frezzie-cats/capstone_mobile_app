@@ -136,32 +136,37 @@ class _CameraScreenState extends State<CameraScreen> {
   // SHARED IMAGE PROCESSING
   // --------------------------------------------------
 
+  
   Future<void> _handleImageSelection(
     Future<File?> Function() selectImage,
   ) async {
     if (_isProcessing || !_isReady) return;
 
-    setState(() {
-      _isProcessing = true;
-    });
-
     try {
-      // Capture or select an image.
+      // Step 1: Capture or select an image.
+      // Do not show the analyzing overlay yet.
       final File? imageFile = await selectImage();
 
-      // User cancelled image selection.
-      if (imageFile == null) return;
+      // Stop if the user cancels image selection.
+      if (imageFile == null || !mounted) return;
 
-      // Run the existing two-stage classification.
+      // Step 2: Show the analyzing overlay only after
+      // an image has been successfully selected.
+      setState(() {
+        _isProcessing = true;
+      });
+
+      // Step 3: Run the two-stage classification.
       final result = await _tfliteService.processImage(imageFile);
 
       if (!mounted) return;
 
+      // Step 4: Hide the processing overlay.
       setState(() {
         _isProcessing = false;
       });
 
-      // Pass both classification result and analyzed photo.
+      // Step 5: Navigate to Results Screen with the image.
       await Navigator.push(
         context,
         MaterialPageRoute(
@@ -186,6 +191,7 @@ class _CameraScreenState extends State<CameraScreen> {
       }
     }
   }
+
 
   // --------------------------------------------------
   // SHOW ERROR MESSAGE
