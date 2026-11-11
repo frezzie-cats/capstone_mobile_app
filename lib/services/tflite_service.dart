@@ -135,6 +135,7 @@ class TfliteService {
       decodedImage,
       width: 224,
       height: 224,
+      interpolation: img.Interpolation.linear,
     );
 
     final Float32List inputBuffer = Float32List(1 * 224 * 224 * 3);
