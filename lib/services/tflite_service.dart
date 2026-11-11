@@ -149,6 +149,17 @@ class TfliteService {
       'Resized dimensions: ${resizedImage.width} x ${resizedImage.height}',
     );
 
+    //Saving Resized Image in Phone Cache
+    // final resizedBytes = img.encodePng(resizedImage);
+
+    // final debugFile = File(
+    //   '${imageFile.parent.path}/debug_resized_${imageFile.uri.pathSegments.last}.png',
+    // );
+
+    // await debugFile.writeAsBytes(resizedBytes);
+
+    // debugPrint('Saved resized image: ${debugFile.path}');
+
     final Float32List inputBuffer = Float32List(1 * 224 * 224 * 3);
 
     int pixelIndex = 0;
