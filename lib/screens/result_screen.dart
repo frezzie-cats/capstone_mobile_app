@@ -1,13 +1,17 @@
 
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import '../services/tflite_service.dart';
 
 class ResultScreen extends StatelessWidget {
   final TriageResult result;
+  final File imageFile;
 
   const ResultScreen({
     super.key,
     required this.result,
+    required this.imageFile,
   });
 
   static const Color primaryTeal = Color(0xFF087F78);
@@ -47,7 +51,85 @@ class ResultScreen extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Result heading
+              // Analyzed photo heading
+              const Text(
+                'Analyzed Photo',
+                style: TextStyle(
+                  fontSize: 21,
+                  fontWeight: FontWeight.bold,
+                  color: Color(0xFF203B39),
+                ),
+              ),
+
+              const SizedBox(height: 6),
+
+              const Text(
+                'This is the image used for classification.',
+                style: TextStyle(
+                  fontSize: 13,
+                  color: Colors.black54,
+                ),
+              ),
+
+              const SizedBox(height: 14),
+
+              // Analyzed photo preview
+              Container(
+                width: double.infinity,
+                constraints: const BoxConstraints(
+                  maxHeight: 300,
+                ),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(18),
+                  border: Border.all(
+                    color: const Color(0xFFE3EBEA),
+                  ),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.05),
+                      blurRadius: 12,
+                      offset: const Offset(0, 4),
+                    ),
+                  ],
+                ),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(18),
+                  child: Image.file(
+                    imageFile,
+                    width: double.infinity,
+                    fit: BoxFit.contain,
+                    errorBuilder: (context, error, stackTrace) {
+                      return const SizedBox(
+                        height: 180,
+                        child: Center(
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                Icons.broken_image_outlined,
+                                size: 40,
+                                color: Colors.grey,
+                              ),
+                              SizedBox(height: 8),
+                              Text(
+                                'Unable to display image',
+                                style: TextStyle(
+                                  color: Colors.grey,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+              ),
+
+              const SizedBox(height: 25),
+
+              // Classification heading
               const Text(
                 'Classification Summary',
                 style: TextStyle(
@@ -173,7 +255,8 @@ class ResultScreen extends StatelessWidget {
                         value: confidence,
                         minHeight: 9,
                         backgroundColor: const Color(0xFFE7EEEE),
-                        valueColor: const AlwaysStoppedAnimation<Color>(
+                        valueColor:
+                            const AlwaysStoppedAnimation<Color>(
                           primaryTeal,
                         ),
                       ),

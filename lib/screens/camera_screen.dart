@@ -58,13 +58,9 @@ class _CameraScreenState extends State<CameraScreen> {
         enableAudio: false,
       );
 
-      // Start camera initialization.
       _cameraInitializationFuture = _controller!.initialize();
-
-      // Start model loading at the same time.
       _modelsFuture = _tfliteService.loadModels();
 
-      // Wait for both operations.
       _initializeApp();
     } catch (e) {
       _initializationError = e.toString();
@@ -128,7 +124,6 @@ class _CameraScreenState extends State<CameraScreen> {
         imageQuality: 90,
       );
 
-      // Return null if the user cancels image selection.
       if (selectedImage == null) {
         return null;
       }
@@ -162,17 +157,17 @@ class _CameraScreenState extends State<CameraScreen> {
 
       if (!mounted) return;
 
-      // Stop processing before navigation.
       setState(() {
         _isProcessing = false;
       });
 
-      // Navigate to the existing result screen.
+      // Pass both classification result and analyzed photo.
       await Navigator.push(
         context,
         MaterialPageRoute(
           builder: (context) => ResultScreen(
             result: result,
+            imageFile: imageFile,
           ),
         ),
       );
@@ -438,10 +433,8 @@ class _CameraScreenState extends State<CameraScreen> {
                 child: Stack(
                   fit: StackFit.expand,
                   children: [
-                    // Camera preview
                     _buildCameraPreview(),
 
-                    // Dark gradient overlay
                     IgnorePointer(
                       child: DecoratedBox(
                         decoration: BoxDecoration(
@@ -458,7 +451,6 @@ class _CameraScreenState extends State<CameraScreen> {
                       ),
                     ),
 
-                    // Camera frame and instructions
                     Center(
                       child: Column(
                         mainAxisSize: MainAxisSize.min,
@@ -478,7 +470,6 @@ class _CameraScreenState extends State<CameraScreen> {
                       ),
                     ),
 
-                    // Processing overlay
                     if (_isProcessing)
                       Container(
                         color: Colors.black.withValues(alpha: 0.8),
