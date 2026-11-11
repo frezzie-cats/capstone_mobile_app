@@ -23,16 +23,21 @@ tasks.register<Delete>("clean") {
     delete(rootProject.layout.buildDirectory)
 }
 
+
+
 subprojects {
-    if (name != "app") {
-        plugins.withId("org.jetbrains.kotlin.android") {
-            tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().configureEach {
-                compilerOptions {
-                    jvmTarget.set(
-                        org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_11
-                    )
-                }
+    plugins.withId("org.jetbrains.kotlin.android") {
+        val targetJvm = if (name == "tflite_flutter") {
+            org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_11
+        } else {
+            org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17
+        }
+
+        tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().configureEach {
+            compilerOptions {
+                jvmTarget.set(targetJvm)
             }
         }
     }
 }
+
