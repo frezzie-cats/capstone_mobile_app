@@ -1,5 +1,6 @@
 
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
 import 'package:image/image.dart' as img;
@@ -55,13 +56,11 @@ class TfliteService {
       );
     }
 
-    // Return immediately if both models are already loaded.
     if (_stage1Interpreter != null &&
         _stage2Interpreter != null) {
       return Future<void>.value();
     }
 
-    // Share an existing loading operation.
     if (_loadingFuture != null) {
       return _loadingFuture!;
     }
@@ -98,7 +97,6 @@ class TfliteService {
         );
       }
 
-      // Assign only after both models have loaded.
       _stage1Interpreter = stage1;
       _stage2Interpreter = stage2;
 
@@ -107,7 +105,6 @@ class TfliteService {
       debugPrint('Model loading failed: $e');
       debugPrintStack(stackTrace: stackTrace);
 
-      // Clean up partially loaded interpreters.
       stage1?.close();
       stage2?.close();
 
@@ -124,6 +121,7 @@ class TfliteService {
   // PREPROCESS IMAGE
   // --------------------------------------------------
 
+
   Future<Float32List> _preprocessImage(File imageFile) async {
     final bytes = await imageFile.readAsBytes();
 
@@ -139,9 +137,7 @@ class TfliteService {
       height: 224,
     );
 
-    final Float32List inputBuffer = Float32List(
-      1 * 224 * 224 * 3,
-    );
+    final Float32List inputBuffer = Float32List(1 * 224 * 224 * 3);
 
     int pixelIndex = 0;
 
@@ -149,9 +145,11 @@ class TfliteService {
       for (int x = 0; x < 224; x++) {
         final pixel = resizedImage.getPixel(x, y);
 
-        inputBuffer[pixelIndex++] = (pixel.r - 127.5) / 127.5;
-        inputBuffer[pixelIndex++] = (pixel.g - 127.5) / 127.5;
-        inputBuffer[pixelIndex++] = (pixel.b - 127.5) / 127.5;
+        // Pass raw RGB values (0–255).
+        // MobileNetV2 preprocessing is already inside the TFLite model.
+        inputBuffer[pixelIndex++] = pixel.r.toDouble();
+        inputBuffer[pixelIndex++] = pixel.g.toDouble();
+        inputBuffer[pixelIndex++] = pixel.b.toDouble();
       }
     }
 
@@ -169,7 +167,7 @@ class TfliteService {
       );
     }
 
-    // Ensure both models are ready before inference.
+    // Ensure both models are ready.
     await loadModels();
 
     if (_stage1Interpreter == null ||
@@ -199,8 +197,26 @@ class TfliteService {
       stage1Output,
     );
 
-    final List<double> s1Probabilities = List<double>.from(
-      stage1Output[0],
+    final List<double> s1Probabilities =
+        List<double>.from(stage1Output[0]);
+
+    // --------------------------------------------------
+    // STAGE 1: DEBUGGING INFORMATION
+    // --------------------------------------------------
+
+    debugPrint('');
+    debugPrint('========================================');
+    debugPrint('       STAGE 1 - MOBILENETV2 DEBUG');
+    debugPrint('========================================');
+
+    debugPrint(
+      'No bites probability: '
+      '${s1Probabilities[0].toStringAsFixed(6)}',
+    );
+
+    debugPrint(
+      'Bite present probability: '
+      '${s1Probabilities[1].toStringAsFixed(6)}',
     );
 
     int s1PredictedIndex =
@@ -208,8 +224,26 @@ class TfliteService {
 
     String s1Class = stage1Labels[s1PredictedIndex];
 
-    // If no bite or lesion is detected.
+    debugPrint('Stage 1 predicted: $s1Class');
+
+    debugPrint(
+      'Stage 1 confidence: '
+      '${(s1Probabilities[s1PredictedIndex] * 100).toStringAsFixed(2)}%',
+    );
+
+    debugPrint('========================================');
+    debugPrint('');
+
+    // --------------------------------------------------
+    // IF NO BITE IS DETECTED
+    // --------------------------------------------------
+
     if (s1Class == 'no_bites') {
+      debugPrint(
+        'Stage 1 rejected the image. '
+        'Stage 2 will NOT execute.',
+      );
+
       return TriageResult(
         isLesionDetected: false,
         speciesKey: 'no_bites',
@@ -221,6 +255,10 @@ class TfliteService {
             'If you develop unexpected skin redness, swelling, or localized pain, re-evaluate.',
       );
     }
+
+    debugPrint(
+      'Stage 1 detected a bite. Proceeding to Stage 2...',
+    );
 
     // --------------------------------------------------
     // STAGE 2: FOUR-CLASS CLASSIFICATION
@@ -236,9 +274,8 @@ class TfliteService {
       stage2Output,
     );
 
-    final List<double> s2Probabilities = List<double>.from(
-      stage2Output[0],
-    );
+    final List<double> s2Probabilities =
+        List<double>.from(stage2Output[0]);
 
     int s2TopIndex = 0;
     double maxProb = s2Probabilities[0];
@@ -250,9 +287,37 @@ class TfliteService {
       }
     }
 
-    String predictedSpeciesKey = stage2Labels[s2TopIndex];
+    String predictedSpeciesKey =
+        stage2Labels[s2TopIndex];
 
     double confidenceScore = maxProb * 100;
+
+    // --------------------------------------------------
+    // STAGE 2: DEBUGGING INFORMATION
+    // --------------------------------------------------
+
+    debugPrint('');
+    debugPrint('========================================');
+    debugPrint('      STAGE 2 - EFFICIENTNET-B0 DEBUG');
+    debugPrint('========================================');
+
+    for (int i = 0; i < s2Probabilities.length; i++) {
+      debugPrint(
+        '${stage2Labels[i]}: '
+        '${s2Probabilities[i].toStringAsFixed(6)}',
+      );
+    }
+
+    debugPrint('----------------------------------------');
+    debugPrint('Stage 2 predicted: $predictedSpeciesKey');
+
+    debugPrint(
+      'Stage 2 confidence: '
+      '${confidenceScore.toStringAsFixed(2)}%',
+    );
+
+    debugPrint('========================================');
+    debugPrint('');
 
     // --------------------------------------------------
     // STAGE 3: SQLITE DATABASE LOOKUP
