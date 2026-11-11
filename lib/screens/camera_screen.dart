@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 
 import 'package:capstone_mobile_app/services/tflite_service.dart';
 import 'package:capstone_mobile_app/screens/result_screen.dart';
@@ -23,11 +24,11 @@ class _CameraScreenState extends State<CameraScreen> {
   // Camera and AI service
   CameraController? _controller;
   final TfliteService _tfliteService = TfliteService();
+  final ImagePicker _imagePicker = ImagePicker();
 
   // Initialization futures
   late Future<void> _cameraInitializationFuture;
   late Future<void> _modelsFuture;
-  late Future<void> _initializationFuture;
 
   // UI states
   bool _isReady = false;
@@ -37,7 +38,6 @@ class _CameraScreenState extends State<CameraScreen> {
   @override
   void initState() {
     super.initState();
-
     _initializeCameraAndModels();
   }
 
@@ -48,7 +48,6 @@ class _CameraScreenState extends State<CameraScreen> {
   void _initializeCameraAndModels() {
     if (widget.cameras.isEmpty) {
       _initializationError = 'No camera was detected on this device.';
-      _initializationFuture = Future<void>.value();
       return;
     }
 
@@ -66,10 +65,9 @@ class _CameraScreenState extends State<CameraScreen> {
       _modelsFuture = _tfliteService.loadModels();
 
       // Wait for both operations.
-      _initializationFuture = _initializeApp();
+      _initializeApp();
     } catch (e) {
       _initializationError = e.toString();
-      _initializationFuture = Future<void>.value();
     }
   }
 
@@ -102,12 +100,10 @@ class _CameraScreenState extends State<CameraScreen> {
   }
 
   // --------------------------------------------------
-  // CAPTURE AND PROCESS IMAGE
+  // CAPTURE IMAGE USING CAMERA
   // --------------------------------------------------
 
   Future<void> _captureAndProcess() async {
-    if (_isProcessing || !_isReady) return;
-
     final controller = _controller;
 
     if (controller == null || !controller.value.isInitialized) {
@@ -115,31 +111,63 @@ class _CameraScreenState extends State<CameraScreen> {
       return;
     }
 
-    try {
-      setState(() {
-        _isProcessing = true;
-      });
-
-      // Ensure initialization has completed.
-      await _initializationFuture;
-
-      if (!mounted) return;
-
-      // Capture image.
+    await _handleImageSelection(() async {
       final XFile capturedImage = await controller.takePicture();
+      return File(capturedImage.path);
+    });
+  }
 
-      final File imageFile = File(capturedImage.path);
+  // --------------------------------------------------
+  // SELECT IMAGE FROM GALLERY
+  // --------------------------------------------------
 
-      // Run the two-stage classification.
+  Future<void> _pickAndProcess() async {
+    await _handleImageSelection(() async {
+      final XFile? selectedImage = await _imagePicker.pickImage(
+        source: ImageSource.gallery,
+        imageQuality: 90,
+      );
+
+      // Return null if the user cancels image selection.
+      if (selectedImage == null) {
+        return null;
+      }
+
+      return File(selectedImage.path);
+    });
+  }
+
+  // --------------------------------------------------
+  // SHARED IMAGE PROCESSING
+  // --------------------------------------------------
+
+  Future<void> _handleImageSelection(
+    Future<File?> Function() selectImage,
+  ) async {
+    if (_isProcessing || !_isReady) return;
+
+    setState(() {
+      _isProcessing = true;
+    });
+
+    try {
+      // Capture or select an image.
+      final File? imageFile = await selectImage();
+
+      // User cancelled image selection.
+      if (imageFile == null) return;
+
+      // Run the existing two-stage classification.
       final result = await _tfliteService.processImage(imageFile);
 
       if (!mounted) return;
 
+      // Stop processing before navigation.
       setState(() {
         _isProcessing = false;
       });
 
-      // Navigate to the result screen.
+      // Navigate to the existing result screen.
       await Navigator.push(
         context,
         MaterialPageRoute(
@@ -154,13 +182,19 @@ class _CameraScreenState extends State<CameraScreen> {
 
       if (!mounted) return;
 
-      setState(() {
-        _isProcessing = false;
-      });
-
       _showError('Error processing image: $e');
+    } finally {
+      if (mounted && _isProcessing) {
+        setState(() {
+          _isProcessing = false;
+        });
+      }
     }
   }
+
+  // --------------------------------------------------
+  // SHOW ERROR MESSAGE
+  // --------------------------------------------------
 
   void _showError(String message) {
     if (!mounted) return;
@@ -512,6 +546,7 @@ class _CameraScreenState extends State<CameraScreen> {
 
                   const SizedBox(height: 20),
 
+                  // CAPTURE BUTTON
                   SizedBox(
                     width: double.infinity,
                     height: 56,
@@ -541,6 +576,40 @@ class _CameraScreenState extends State<CameraScreen> {
                         disabledBackgroundColor: Colors.grey.shade700,
                         disabledForegroundColor: Colors.white70,
                         elevation: 0,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(16),
+                        ),
+                      ),
+                    ),
+                  ),
+
+                  const SizedBox(height: 12),
+
+                  // GALLERY UPLOAD BUTTON
+                  SizedBox(
+                    width: double.infinity,
+                    height: 54,
+                    child: OutlinedButton.icon(
+                      onPressed: (_isProcessing || !_isReady)
+                          ? null
+                          : _pickAndProcess,
+                      icon: const Icon(
+                        Icons.photo_library_outlined,
+                      ),
+                      label: const Text(
+                        'Upload from Gallery',
+                        style: TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: const Color(0xFF32D6C3),
+                        disabledForegroundColor: Colors.white38,
+                        side: const BorderSide(
+                          color: Color(0xFF32D6C3),
+                          width: 1.5,
+                        ),
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(16),
                         ),
