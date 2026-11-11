@@ -137,6 +137,7 @@ class _CameraScreenState extends State<CameraScreen> {
   // --------------------------------------------------
 
   
+  
   Future<void> _handleImageSelection(
     Future<File?> Function() selectImage,
   ) async {
@@ -144,29 +145,50 @@ class _CameraScreenState extends State<CameraScreen> {
 
     try {
       // Step 1: Capture or select an image.
-      // Do not show the analyzing overlay yet.
+      // The analyzing overlay stays hidden during gallery selection.
       final File? imageFile = await selectImage();
 
       // Stop if the user cancels image selection.
       if (imageFile == null || !mounted) return;
 
-      // Step 2: Show the analyzing overlay only after
-      // an image has been successfully selected.
+      // Step 2: Show the analyzing overlay.
       setState(() {
         _isProcessing = true;
       });
 
-      // Step 3: Run the two-stage classification.
-      final result = await _tfliteService.processImage(imageFile);
+      // Make sure Flutter displays the loading overlay
+      // before starting model inference.
+      await WidgetsBinding.instance.endOfFrame;
 
       if (!mounted) return;
 
-      // Step 4: Hide the processing overlay.
+      // Start measuring the analysis time.
+      final stopwatch = Stopwatch()..start();
+
+      // Step 3: Run the two-stage classification.
+      final result = await _tfliteService.processImage(imageFile);
+
+      stopwatch.stop();
+
+      // Step 4: Keep the loading overlay visible
+      // for at least one second.
+      const minimumLoadingTime = Duration(seconds: 1);
+
+      final remainingTime =
+          minimumLoadingTime - stopwatch.elapsed;
+
+      if (remainingTime > Duration.zero) {
+        await Future.delayed(remainingTime);
+      }
+
+      if (!mounted) return;
+
+      // Step 5: Hide the loading overlay.
       setState(() {
         _isProcessing = false;
       });
 
-      // Step 5: Navigate to Results Screen with the image.
+      // Step 6: Navigate to the Results Screen.
       await Navigator.push(
         context,
         MaterialPageRoute(
@@ -191,7 +213,6 @@ class _CameraScreenState extends State<CameraScreen> {
       }
     }
   }
-
 
   // --------------------------------------------------
   // SHOW ERROR MESSAGE
