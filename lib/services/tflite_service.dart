@@ -2,6 +2,7 @@
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart';
 import 'package:image/image.dart' as img;
 import 'package:tflite_flutter/tflite_flutter.dart';
 
@@ -29,6 +30,9 @@ class TfliteService {
   Interpreter? _stage1Interpreter;
   Interpreter? _stage2Interpreter;
 
+  Future<void>? _loadingFuture;
+  bool _isDisposed = false;
+
   static const List<String> stage1Labels = [
     'no_bites',
     'bite_present',
@@ -41,20 +45,88 @@ class TfliteService {
     'tick_erythema_migrans',
   ];
 
-  // Load machine learning models
-  Future<void> loadModels() async {
-    _stage1Interpreter = await Interpreter.fromAsset(
-      'assets/models/stage1_mobilenetv2_binary.tflite',
-    );
+  // --------------------------------------------------
+  // LOAD MODELS
+  // --------------------------------------------------
 
-    _stage2Interpreter = await Interpreter.fromAsset(
-      'assets/models/stage2_efficientnetb0_4class.tflite',
-    );
+  Future<void> loadModels() {
+    if (_isDisposed) {
+      return Future.error(
+        StateError('TfliteService has already been disposed.'),
+      );
+    }
+
+    // Return immediately if both models are already loaded.
+    if (_stage1Interpreter != null &&
+        _stage2Interpreter != null) {
+      return Future<void>.value();
+    }
+
+    // Share an existing loading operation.
+    if (_loadingFuture != null) {
+      return _loadingFuture!;
+    }
+
+    _loadingFuture = _loadModelsInternal();
+
+    return _loadingFuture!;
   }
 
-  // Preprocess image before classification
-  Float32List _preprocessImage(File imageFile) {
-    final bytes = imageFile.readAsBytesSync();
+  Future<void> _loadModelsInternal() async {
+    Interpreter? stage1;
+    Interpreter? stage2;
+
+    try {
+      debugPrint('Loading Stage 1 model...');
+
+      stage1 = await Interpreter.fromAsset(
+        'assets/models/stage1_mobilenetv2_binary.tflite',
+      );
+
+      debugPrint('Stage 1 model loaded successfully.');
+
+      debugPrint('Loading Stage 2 model...');
+
+      stage2 = await Interpreter.fromAsset(
+        'assets/models/stage2_efficientnetb0_4class.tflite',
+      );
+
+      debugPrint('Stage 2 model loaded successfully.');
+
+      if (_isDisposed) {
+        throw StateError(
+          'TfliteService was disposed during model loading.',
+        );
+      }
+
+      // Assign only after both models have loaded.
+      _stage1Interpreter = stage1;
+      _stage2Interpreter = stage2;
+
+      debugPrint('Both TensorFlow Lite models are ready.');
+    } catch (e, stackTrace) {
+      debugPrint('Model loading failed: $e');
+      debugPrintStack(stackTrace: stackTrace);
+
+      // Clean up partially loaded interpreters.
+      stage1?.close();
+      stage2?.close();
+
+      _stage1Interpreter = null;
+      _stage2Interpreter = null;
+
+      rethrow;
+    } finally {
+      _loadingFuture = null;
+    }
+  }
+
+  // --------------------------------------------------
+  // PREPROCESS IMAGE
+  // --------------------------------------------------
+
+  Future<Float32List> _preprocessImage(File imageFile) async {
+    final bytes = await imageFile.readAsBytes();
 
     final decodedImage = img.decodeImage(bytes);
 
@@ -87,18 +159,37 @@ class TfliteService {
     return inputBuffer;
   }
 
-  // Process captured image
+  // --------------------------------------------------
+  // PROCESS IMAGE
+  // --------------------------------------------------
+
   Future<TriageResult> processImage(File imageFile) async {
-    if (_stage1Interpreter == null ||
-        _stage2Interpreter == null) {
-      await loadModels();
+    if (_isDisposed) {
+      throw StateError(
+        'Cannot process images after TfliteService is disposed.',
+      );
     }
 
-    final inputTensor = _preprocessImage(imageFile).reshape(
+    // Ensure both models are ready before inference.
+    await loadModels();
+
+    if (_stage1Interpreter == null ||
+        _stage2Interpreter == null) {
+      throw StateError(
+        'TensorFlow Lite models are not initialized.',
+      );
+    }
+
+    final inputBuffer = await _preprocessImage(imageFile);
+
+    final inputTensor = inputBuffer.reshape(
       [1, 224, 224, 3],
     );
 
-    // STAGE 1: Binary Gatekeeper
+    // --------------------------------------------------
+    // STAGE 1: BINARY CLASSIFICATION
+    // --------------------------------------------------
+
     var stage1Output = List.generate(
       1,
       (_) => List<double>.filled(2, 0.0),
@@ -109,7 +200,7 @@ class TfliteService {
       stage1Output,
     );
 
-    List<double> s1Probabilities = List<double>.from(
+    final List<double> s1Probabilities = List<double>.from(
       stage1Output[0],
     );
 
@@ -118,7 +209,7 @@ class TfliteService {
 
     String s1Class = stage1Labels[s1PredictedIndex];
 
-    // If no bite or lesion is detected
+    // If no bite or lesion is detected.
     if (s1Class == 'no_bites') {
       return TriageResult(
         isLesionDetected: false,
@@ -132,7 +223,10 @@ class TfliteService {
       );
     }
 
-    // STAGE 2: Specialist Classification
+    // --------------------------------------------------
+    // STAGE 2: FOUR-CLASS CLASSIFICATION
+    // --------------------------------------------------
+
     var stage2Output = List.generate(
       1,
       (_) => List<double>.filled(4, 0.0),
@@ -143,7 +237,7 @@ class TfliteService {
       stage2Output,
     );
 
-    List<double> s2Probabilities = List<double>.from(
+    final List<double> s2Probabilities = List<double>.from(
       stage2Output[0],
     );
 
@@ -161,25 +255,31 @@ class TfliteService {
 
     double confidenceScore = maxProb * 100;
 
-    // STAGE 3: SQLite Database Lookup
-    final guidelineData = await DatabaseHelper.instance.getGuideline(
+    // --------------------------------------------------
+    // STAGE 3: SQLITE DATABASE LOOKUP
+    // --------------------------------------------------
+
+    final guidelineData =
+        await DatabaseHelper.instance.getGuideline(
       predictedSpeciesKey,
     );
 
-    // Safely retrieve database values as Strings
     final String commonName =
         guidelineData?['common_name'] as String? ??
-        predictedSpeciesKey;
+            predictedSpeciesKey;
 
     final String firstAidSteps =
         guidelineData?['first_aid_steps'] as String? ??
-        'First-aid details unavailable.';
+            'First-aid details unavailable.';
 
     final String warningSigns =
         guidelineData?['warning_signs'] as String? ??
-        'Warning sign information unavailable.';
+            'Warning sign information unavailable.';
 
-    // Return final triage result
+    // --------------------------------------------------
+    // RETURN RESULT
+    // --------------------------------------------------
+
     return TriageResult(
       isLesionDetected: true,
       speciesKey: predictedSpeciesKey,
@@ -190,12 +290,21 @@ class TfliteService {
     );
   }
 
-  // Dispose machine learning interpreters
+  // --------------------------------------------------
+  // DISPOSE INTERPRETERS
+  // --------------------------------------------------
+
   void dispose() {
+    if (_isDisposed) return;
+
+    _isDisposed = true;
+
     _stage1Interpreter?.close();
     _stage2Interpreter?.close();
 
     _stage1Interpreter = null;
     _stage2Interpreter = null;
+
+    debugPrint('TensorFlow Lite interpreters disposed.');
   }
 }
