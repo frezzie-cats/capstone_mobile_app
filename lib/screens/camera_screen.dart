@@ -121,7 +121,7 @@ class _CameraScreenState extends State<CameraScreen> {
     await _handleImageSelection(() async {
       final XFile? selectedImage = await _imagePicker.pickImage(
         source: ImageSource.gallery,
-        imageQuality: 90,
+        // imageQuality: 90,
       );
 
       if (selectedImage == null) {

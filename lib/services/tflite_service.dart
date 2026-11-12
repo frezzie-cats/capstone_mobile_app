@@ -122,6 +122,7 @@ class TfliteService {
   // --------------------------------------------------
 
 
+
   Future<Float32List> _preprocessImage(File imageFile) async {
     final bytes = await imageFile.readAsBytes();
 
@@ -131,11 +132,33 @@ class TfliteService {
       throw Exception('Failed to decode image.');
     }
 
+    debugPrint('========== IMAGE PREPROCESSING ==========');
+    debugPrint('File path: ${imageFile.path}');
+    debugPrint(
+      'Original dimensions: ${decodedImage.width} x ${decodedImage.height}',
+    );
+
     final resizedImage = img.copyResize(
       decodedImage,
       width: 224,
       height: 224,
+      interpolation: img.Interpolation.linear,
     );
+
+    debugPrint(
+      'Resized dimensions: ${resizedImage.width} x ${resizedImage.height}',
+    );
+
+    //Saving Resized Image in Phone Cache
+    // final resizedBytes = img.encodePng(resizedImage);
+
+    // final debugFile = File(
+    //   '${imageFile.parent.path}/debug_resized_${imageFile.uri.pathSegments.last}.png',
+    // );
+
+    // await debugFile.writeAsBytes(resizedBytes);
+
+    // debugPrint('Saved resized image: ${debugFile.path}');
 
     final Float32List inputBuffer = Float32List(1 * 224 * 224 * 3);
 
@@ -145,13 +168,14 @@ class TfliteService {
       for (int x = 0; x < 224; x++) {
         final pixel = resizedImage.getPixel(x, y);
 
-        // Pass raw RGB values (0–255).
-        // MobileNetV2 preprocessing is already inside the TFLite model.
         inputBuffer[pixelIndex++] = pixel.r.toDouble();
         inputBuffer[pixelIndex++] = pixel.g.toDouble();
         inputBuffer[pixelIndex++] = pixel.b.toDouble();
       }
     }
+
+    debugPrint('Preprocessing completed.');
+    debugPrint('=========================================');
 
     return inputBuffer;
   }
