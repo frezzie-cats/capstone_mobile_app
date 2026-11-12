@@ -13,6 +13,8 @@ class TriageResult {
   final String speciesKey;
   final String commonName;
   final double confidence;
+  final List<double> stage1Probabilities;
+  final List<double>? stage2Probabilities;
   final String firstAidSteps;
   final String warningSigns;
 
@@ -21,6 +23,8 @@ class TriageResult {
     required this.speciesKey,
     required this.commonName,
     required this.confidence,
+    required this.stage1Probabilities,
+    required this.stage2Probabilities,
     required this.firstAidSteps,
     required this.warningSigns,
   });
@@ -121,8 +125,6 @@ class TfliteService {
   // PREPROCESS IMAGE
   // --------------------------------------------------
 
-
-
   Future<Float32List> _preprocessImage(File imageFile) async {
     final bytes = await imageFile.readAsBytes();
 
@@ -149,18 +151,8 @@ class TfliteService {
       'Resized dimensions: ${resizedImage.width} x ${resizedImage.height}',
     );
 
-    //Saving Resized Image in Phone Cache
-    // final resizedBytes = img.encodePng(resizedImage);
-
-    // final debugFile = File(
-    //   '${imageFile.parent.path}/debug_resized_${imageFile.uri.pathSegments.last}.png',
-    // );
-
-    // await debugFile.writeAsBytes(resizedBytes);
-
-    // debugPrint('Saved resized image: ${debugFile.path}');
-
-    final Float32List inputBuffer = Float32List(1 * 224 * 224 * 3);
+    final Float32List inputBuffer =
+        Float32List(1 * 224 * 224 * 3);
 
     int pixelIndex = 0;
 
@@ -191,7 +183,6 @@ class TfliteService {
       );
     }
 
-    // Ensure both models are ready.
     await loadModels();
 
     if (_stage1Interpreter == null ||
@@ -224,10 +215,6 @@ class TfliteService {
     final List<double> s1Probabilities =
         List<double>.from(stage1Output[0]);
 
-    // --------------------------------------------------
-    // STAGE 1: DEBUGGING INFORMATION
-    // --------------------------------------------------
-
     debugPrint('');
     debugPrint('========================================');
     debugPrint('       STAGE 1 - MOBILENETV2 DEBUG');
@@ -243,10 +230,10 @@ class TfliteService {
       '${s1Probabilities[1].toStringAsFixed(6)}',
     );
 
-    int s1PredictedIndex =
+    final int s1PredictedIndex =
         s1Probabilities[0] > s1Probabilities[1] ? 0 : 1;
 
-    String s1Class = stage1Labels[s1PredictedIndex];
+    final String s1Class = stage1Labels[s1PredictedIndex];
 
     debugPrint('Stage 1 predicted: $s1Class');
 
@@ -273,6 +260,10 @@ class TfliteService {
         speciesKey: 'no_bites',
         commonName: 'No Bite / Unlesioned Skin',
         confidence: s1Probabilities[s1PredictedIndex] * 100,
+        stage1Probabilities: List<double>.unmodifiable(
+          s1Probabilities,
+        ),
+        stage2Probabilities: null,
         firstAidSteps:
             'No active cutaneous lesion detected. Maintain clean skin hygiene.',
         warningSigns:
@@ -311,14 +302,10 @@ class TfliteService {
       }
     }
 
-    String predictedSpeciesKey =
+    final String predictedSpeciesKey =
         stage2Labels[s2TopIndex];
 
-    double confidenceScore = maxProb * 100;
-
-    // --------------------------------------------------
-    // STAGE 2: DEBUGGING INFORMATION
-    // --------------------------------------------------
+    final double confidenceScore = maxProb * 100;
 
     debugPrint('');
     debugPrint('========================================');
@@ -344,7 +331,7 @@ class TfliteService {
     debugPrint('');
 
     // --------------------------------------------------
-    // STAGE 3: SQLITE DATABASE LOOKUP
+    // SQLITE DATABASE LOOKUP
     // --------------------------------------------------
 
     final guidelineData =
@@ -373,6 +360,12 @@ class TfliteService {
       speciesKey: predictedSpeciesKey,
       commonName: commonName,
       confidence: confidenceScore,
+      stage1Probabilities: List<double>.unmodifiable(
+        s1Probabilities,
+      ),
+      stage2Probabilities: List<double>.unmodifiable(
+        s2Probabilities,
+      ),
       firstAidSteps: firstAidSteps,
       warningSigns: warningSigns,
     );
