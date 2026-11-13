@@ -20,9 +20,14 @@ class CameraScreen extends StatefulWidget {
   State<CameraScreen> createState() => _CameraScreenState();
 }
 
-class _CameraScreenState extends State<CameraScreen> {
-  // Camera and AI service
+class _CameraScreenState extends State<CameraScreen>
+    with WidgetsBindingObserver {
+  // --------------------------------------------------
+  // CAMERA AND AI SERVICE
+  // --------------------------------------------------
+
   CameraController? _controller;
+
   final TfliteService _tfliteService = TfliteService();
   final ImagePicker _imagePicker = ImagePicker();
 
@@ -30,68 +35,169 @@ class _CameraScreenState extends State<CameraScreen> {
   late Future<void> _cameraInitializationFuture;
   late Future<void> _modelsFuture;
 
-  // UI states
+  // Prevent outdated camera initialization requests.
+  int _cameraRequestId = 0;
+
+  // --------------------------------------------------
+  // UI STATES
+  // --------------------------------------------------
+
   bool _isReady = false;
   bool _isProcessing = false;
   String? _initializationError;
 
+  // --------------------------------------------------
+  // INITIALIZATION
+  // --------------------------------------------------
+
   @override
   void initState() {
     super.initState();
+
+    WidgetsBinding.instance.addObserver(this);
+
+    // Load AI models only once.
+    _modelsFuture = _tfliteService.loadModels();
+
+    // Initialize camera and AI models.
     _initializeCameraAndModels();
+  }
+
+  // --------------------------------------------------
+  // CAMERA LIFECYCLE MANAGEMENT
+  // --------------------------------------------------
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.inactive ||
+        state == AppLifecycleState.paused ||
+        state == AppLifecycleState.detached) {
+      // Release camera resources when the app is inactive.
+      _releaseCamera();
+    } else if (state == AppLifecycleState.resumed) {
+      // Reinitialize camera when the app returns.
+      _initializeCameraAndModels();
+    }
   }
 
   // --------------------------------------------------
   // INITIALIZE CAMERA AND AI MODELS
   // --------------------------------------------------
 
-  void _initializeCameraAndModels() {
+  Future<void> _initializeCameraAndModels() async {
     if (widget.cameras.isEmpty) {
-      _initializationError = 'No camera was detected on this device.';
+      if (!mounted) return;
+
+      setState(() {
+        _isReady = false;
+        _initializationError =
+            'No camera was detected on this device.';
+      });
+
       return;
     }
 
+    final int requestId = ++_cameraRequestId;
+
+    // Dispose of any previous camera controller.
+    final previousController = _controller;
+    _controller = null;
+
+    if (previousController != null) {
+      await previousController.dispose();
+    }
+
+    // Ignore outdated initialization requests.
+    if (!mounted || requestId != _cameraRequestId) return;
+
+    setState(() {
+      _isReady = false;
+      _initializationError = null;
+    });
+
     try {
-      _controller = CameraController(
+      final controller = CameraController(
         widget.cameras.first,
         ResolutionPreset.medium,
         enableAudio: false,
       );
 
-      _cameraInitializationFuture = _controller!.initialize();
-      _modelsFuture = _tfliteService.loadModels();
+      _controller = controller;
 
-      _initializeApp();
-    } catch (e) {
-      _initializationError = e.toString();
-    }
-  }
+      _cameraInitializationFuture = controller.initialize();
 
-  Future<void> _initializeApp() async {
-    try {
+      // Update the preview while initialization is in progress.
+      setState(() {});
+
+      // Wait for camera initialization and model loading.
       await Future.wait<void>([
         _cameraInitializationFuture,
         _modelsFuture,
       ]);
 
-      if (!mounted) return;
+      // Ensure this is still the latest initialization request.
+      if (!mounted ||
+          requestId != _cameraRequestId ||
+          !identical(_controller, controller)) {
+        await controller.dispose();
+        return;
+      }
 
       setState(() {
         _isReady = true;
         _initializationError = null;
       });
 
-      debugPrint('Camera and AI models initialized successfully.');
+      debugPrint(
+        'Camera and AI models initialized successfully.',
+      );
     } catch (e, stackTrace) {
       debugPrint('App initialization failed: $e');
       debugPrintStack(stackTrace: stackTrace);
 
-      if (!mounted) return;
+      if (!mounted || requestId != _cameraRequestId) return;
+
+      final failedController = _controller;
+      _controller = null;
+
+      if (failedController != null) {
+        await failedController.dispose();
+      }
+
+      if (!mounted || requestId != _cameraRequestId) return;
 
       setState(() {
         _isReady = false;
         _initializationError = e.toString();
       });
+    }
+  }
+
+  // --------------------------------------------------
+  // RELEASE CAMERA
+  // --------------------------------------------------
+
+  Future<void> _releaseCamera() async {
+    // Invalidate pending camera initialization requests.
+    _cameraRequestId++;
+
+    final controller = _controller;
+    _controller = null;
+
+    if (mounted) {
+      setState(() {
+        _isReady = false;
+      });
+    }
+
+    if (controller != null) {
+      try {
+        await controller.dispose();
+
+        debugPrint('Camera controller released.');
+      } catch (e) {
+        debugPrint('Error releasing camera: $e');
+      }
     }
   }
 
@@ -102,13 +208,16 @@ class _CameraScreenState extends State<CameraScreen> {
   Future<void> _captureAndProcess() async {
     final controller = _controller;
 
-    if (controller == null || !controller.value.isInitialized) {
+    if (controller == null ||
+        !controller.value.isInitialized) {
       _showError('Camera is not ready.');
       return;
     }
 
     await _handleImageSelection(() async {
-      final XFile capturedImage = await controller.takePicture();
+      final XFile capturedImage =
+          await controller.takePicture();
+
       return File(capturedImage.path);
     });
   }
@@ -119,9 +228,9 @@ class _CameraScreenState extends State<CameraScreen> {
 
   Future<void> _pickAndProcess() async {
     await _handleImageSelection(() async {
-      final XFile? selectedImage = await _imagePicker.pickImage(
+      final XFile? selectedImage =
+          await _imagePicker.pickImage(
         source: ImageSource.gallery,
-        // imageQuality: 90,
       );
 
       if (selectedImage == null) {
@@ -136,9 +245,6 @@ class _CameraScreenState extends State<CameraScreen> {
   // SHARED IMAGE PROCESSING
   // --------------------------------------------------
 
-  
-  
-  
   Future<void> _handleImageSelection(
     Future<File?> Function() selectImage,
   ) async {
@@ -163,9 +269,10 @@ class _CameraScreenState extends State<CameraScreen> {
       final stopwatch = Stopwatch()..start();
 
       // Step 4: Process the image and generate the result.
-      final result = await _tfliteService.processImage(imageFile);
+      final result =
+          await _tfliteService.processImage(imageFile);
 
-      // Pause measurement to exclude the artificial loading delay.
+      // Pause measurement to exclude artificial loading delay.
       stopwatch.stop();
 
       // Step 5: Preserve the existing minimum loading duration.
@@ -201,10 +308,12 @@ class _CameraScreenState extends State<CameraScreen> {
               debugPrint(
                 '========== TOTAL PROCESSING TIME ==========',
               );
+
               debugPrint(
                 'Total processing time: '
                 '${stopwatch.elapsedMilliseconds} ms',
               );
+
               debugPrint(
                 '============================================',
               );
@@ -271,7 +380,9 @@ class _CameraScreenState extends State<CameraScreen> {
               child: Text(
                 'Unable to initialize camera:\n${snapshot.error}',
                 textAlign: TextAlign.center,
-                style: const TextStyle(color: Colors.white),
+                style: const TextStyle(
+                  color: Colors.white,
+                ),
               ),
             ),
           );
@@ -432,10 +543,12 @@ class _CameraScreenState extends State<CameraScreen> {
                 vertical: 18,
               ),
               child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                mainAxisAlignment:
+                    MainAxisAlignment.spaceBetween,
                 children: [
                   const Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+                    crossAxisAlignment:
+                        CrossAxisAlignment.start,
                     children: [
                       Text(
                         'ARTHROPOD CARE',
@@ -465,7 +578,9 @@ class _CameraScreenState extends State<CameraScreen> {
             // CAMERA AREA
             Expanded(
               child: Container(
-                margin: const EdgeInsets.symmetric(horizontal: 14),
+                margin: const EdgeInsets.symmetric(
+                  horizontal: 14,
+                ),
                 clipBehavior: Clip.antiAlias,
                 decoration: BoxDecoration(
                   color: Colors.black,
@@ -483,9 +598,13 @@ class _CameraScreenState extends State<CameraScreen> {
                             begin: Alignment.topCenter,
                             end: Alignment.bottomCenter,
                             colors: [
-                              Colors.black.withValues(alpha: 0.35),
+                              Colors.black.withValues(
+                                alpha: 0.35,
+                              ),
                               Colors.transparent,
-                              Colors.black.withValues(alpha: 0.55),
+                              Colors.black.withValues(
+                                alpha: 0.55,
+                              ),
                             ],
                           ),
                         ),
@@ -513,7 +632,9 @@ class _CameraScreenState extends State<CameraScreen> {
 
                     if (_isProcessing)
                       Container(
-                        color: Colors.black.withValues(alpha: 0.8),
+                        color: Colors.black.withValues(
+                          alpha: 0.8,
+                        ),
                         child: const Center(
                           child: Column(
                             mainAxisSize: MainAxisSize.min,
@@ -551,7 +672,12 @@ class _CameraScreenState extends State<CameraScreen> {
 
             // BOTTOM CONTROLS
             Padding(
-              padding: const EdgeInsets.fromLTRB(24, 20, 24, 24),
+              padding: const EdgeInsets.fromLTRB(
+                24,
+                20,
+                24,
+                24,
+              ),
               child: Column(
                 children: [
                   const Text(
@@ -583,9 +709,10 @@ class _CameraScreenState extends State<CameraScreen> {
                     width: double.infinity,
                     height: 56,
                     child: ElevatedButton.icon(
-                      onPressed: (_isProcessing || !_isReady)
-                          ? null
-                          : _captureAndProcess,
+                      onPressed:
+                          (_isProcessing || !_isReady)
+                              ? null
+                              : _captureAndProcess,
                       icon: Icon(
                         _isProcessing
                             ? Icons.hourglass_top
@@ -603,13 +730,18 @@ class _CameraScreenState extends State<CameraScreen> {
                         ),
                       ),
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFF32D6C3),
-                        foregroundColor: const Color(0xFF101A20),
-                        disabledBackgroundColor: Colors.grey.shade700,
-                        disabledForegroundColor: Colors.white70,
+                        backgroundColor:
+                            const Color(0xFF32D6C3),
+                        foregroundColor:
+                            const Color(0xFF101A20),
+                        disabledBackgroundColor:
+                            Colors.grey.shade700,
+                        disabledForegroundColor:
+                            Colors.white70,
                         elevation: 0,
                         shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(16),
+                          borderRadius:
+                              BorderRadius.circular(16),
                         ),
                       ),
                     ),
@@ -622,9 +754,10 @@ class _CameraScreenState extends State<CameraScreen> {
                     width: double.infinity,
                     height: 54,
                     child: OutlinedButton.icon(
-                      onPressed: (_isProcessing || !_isReady)
-                          ? null
-                          : _pickAndProcess,
+                      onPressed:
+                          (_isProcessing || !_isReady)
+                              ? null
+                              : _pickAndProcess,
                       icon: const Icon(
                         Icons.photo_library_outlined,
                       ),
@@ -636,14 +769,17 @@ class _CameraScreenState extends State<CameraScreen> {
                         ),
                       ),
                       style: OutlinedButton.styleFrom(
-                        foregroundColor: const Color(0xFF32D6C3),
-                        disabledForegroundColor: Colors.white38,
+                        foregroundColor:
+                            const Color(0xFF32D6C3),
+                        disabledForegroundColor:
+                            Colors.white38,
                         side: const BorderSide(
                           color: Color(0xFF32D6C3),
                           width: 1.5,
                         ),
                         shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(16),
+                          borderRadius:
+                              BorderRadius.circular(16),
                         ),
                       ),
                     ),
@@ -663,8 +799,18 @@ class _CameraScreenState extends State<CameraScreen> {
 
   @override
   void dispose() {
-    _tfliteService.dispose();
+    WidgetsBinding.instance.removeObserver(this);
+
+    // Invalidate pending camera initialization requests.
+    _cameraRequestId++;
+
+    // Release camera resources.
     _controller?.dispose();
+    _controller = null;
+
+    // Dispose of AI resources when leaving this screen.
+    _tfliteService.dispose();
+
     super.dispose();
   }
 }
