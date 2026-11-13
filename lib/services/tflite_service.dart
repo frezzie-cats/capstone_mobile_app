@@ -1,6 +1,5 @@
 
 import 'dart:io';
-import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
 import 'package:image/image.dart' as img;
@@ -18,6 +17,11 @@ class TriageResult {
   final String firstAidSteps;
   final String warningSigns;
 
+  // Performance measurements
+  final double stage1InferenceMs;
+  final double? stage2InferenceMs;
+  final double totalInferenceMs;
+
   TriageResult({
     required this.isLesionDetected,
     required this.speciesKey,
@@ -27,6 +31,9 @@ class TriageResult {
     required this.stage2Probabilities,
     required this.firstAidSteps,
     required this.warningSigns,
+    required this.stage1InferenceMs,
+    required this.stage2InferenceMs,
+    required this.totalInferenceMs,
   });
 }
 
@@ -207,10 +214,18 @@ class TfliteService {
       (_) => List<double>.filled(2, 0.0),
     );
 
+    // Measure Stage 1 inference time
+    final stage1Stopwatch = Stopwatch()..start();
+
     _stage1Interpreter!.run(
       inputTensor,
       stage1Output,
     );
+
+    stage1Stopwatch.stop();
+
+    final double stage1InferenceMs =
+        stage1Stopwatch.elapsedMicroseconds / 1000.0;
 
     final List<double> s1Probabilities =
         List<double>.from(stage1Output[0]);
@@ -242,6 +257,11 @@ class TfliteService {
       '${(s1Probabilities[s1PredictedIndex] * 100).toStringAsFixed(2)}%',
     );
 
+    debugPrint(
+      'Stage 1 inference time: '
+      '${stage1InferenceMs.toStringAsFixed(3)} ms',
+    );
+
     debugPrint('========================================');
     debugPrint('');
 
@@ -254,6 +274,17 @@ class TfliteService {
         'Stage 1 rejected the image. '
         'Stage 2 will NOT execute.',
       );
+
+      debugPrint('========== INFERENCE PERFORMANCE ==========');
+      debugPrint(
+        'Stage 1: ${stage1InferenceMs.toStringAsFixed(3)} ms',
+      );
+      debugPrint('Stage 2: N/A (not executed)');
+      debugPrint(
+        'Total inference time: '
+        '${stage1InferenceMs.toStringAsFixed(3)} ms',
+      );
+      debugPrint('============================================');
 
       return TriageResult(
         isLesionDetected: false,
@@ -268,6 +299,9 @@ class TfliteService {
             'No active cutaneous lesion detected. Maintain clean skin hygiene.',
         warningSigns:
             'If you develop unexpected skin redness, swelling, or localized pain, re-evaluate.',
+        stage1InferenceMs: stage1InferenceMs,
+        stage2InferenceMs: null,
+        totalInferenceMs: stage1InferenceMs,
       );
     }
 
@@ -284,10 +318,22 @@ class TfliteService {
       (_) => List<double>.filled(4, 0.0),
     );
 
+    // Measure Stage 2 inference time
+    final stage2Stopwatch = Stopwatch()..start();
+
     _stage2Interpreter!.run(
       inputTensor,
       stage2Output,
     );
+
+    stage2Stopwatch.stop();
+
+    final double stage2InferenceMs =
+        stage2Stopwatch.elapsedMicroseconds / 1000.0;
+
+    // Total time spent executing both models
+    final double totalInferenceMs =
+        stage1InferenceMs + stage2InferenceMs;
 
     final List<double> s2Probabilities =
         List<double>.from(stage2Output[0]);
@@ -352,6 +398,26 @@ class TfliteService {
             'Warning sign information unavailable.';
 
     // --------------------------------------------------
+    // INFERENCE PERFORMANCE SUMMARY
+    // --------------------------------------------------
+
+    debugPrint('');
+    debugPrint('========== INFERENCE PERFORMANCE ==========');
+    debugPrint(
+      'Stage 1 (MobileNetV2): '
+      '${stage1InferenceMs.toStringAsFixed(3)} ms',
+    );
+    debugPrint(
+      'Stage 2 (EfficientNetB0): '
+      '${stage2InferenceMs.toStringAsFixed(3)} ms',
+    );
+    debugPrint(
+      'Total inference time: '
+      '${totalInferenceMs.toStringAsFixed(3)} ms',
+    );
+    debugPrint('============================================');
+
+    // --------------------------------------------------
     // RETURN RESULT
     // --------------------------------------------------
 
@@ -368,6 +434,9 @@ class TfliteService {
       ),
       firstAidSteps: firstAidSteps,
       warningSigns: warningSigns,
+      stage1InferenceMs: stage1InferenceMs,
+      stage2InferenceMs: stage2InferenceMs,
+      totalInferenceMs: totalInferenceMs,
     );
   }
 
