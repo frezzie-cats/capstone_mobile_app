@@ -138,6 +138,7 @@ class _CameraScreenState extends State<CameraScreen> {
 
   
   
+  
   Future<void> _handleImageSelection(
     Future<File?> Function() selectImage,
   ) async {
@@ -145,33 +146,29 @@ class _CameraScreenState extends State<CameraScreen> {
 
     try {
       // Step 1: Capture or select an image.
-      // The analyzing overlay stays hidden during gallery selection.
       final File? imageFile = await selectImage();
 
-      // Stop if the user cancels image selection.
       if (imageFile == null || !mounted) return;
 
-      // Step 2: Show the analyzing overlay.
+      // Step 2: Display the analyzing overlay.
       setState(() {
         _isProcessing = true;
       });
 
-      // Make sure Flutter displays the loading overlay
-      // before starting model inference.
       await WidgetsBinding.instance.endOfFrame;
 
       if (!mounted) return;
 
-      // Start measuring the analysis time.
+      // Step 3: Start measuring total processing time.
       final stopwatch = Stopwatch()..start();
 
-      // Step 3: Run the two-stage classification.
+      // Step 4: Process the image and generate the result.
       final result = await _tfliteService.processImage(imageFile);
 
+      // Pause measurement to exclude the artificial loading delay.
       stopwatch.stop();
 
-      // Step 4: Keep the loading overlay visible
-      // for at least one second.
+      // Step 5: Preserve the existing minimum loading duration.
       const minimumLoadingTime = Duration(seconds: 1);
 
       final remainingTime =
@@ -183,18 +180,35 @@ class _CameraScreenState extends State<CameraScreen> {
 
       if (!mounted) return;
 
-      // Step 5: Hide the loading overlay.
+      // Step 6: Hide the analyzing overlay.
       setState(() {
         _isProcessing = false;
       });
 
-      // Step 6: Navigate to the Results Screen.
+      // Resume measurement before navigating to the result screen.
+      stopwatch.start();
+
+      // Step 7: Navigate to the result screen.
       await Navigator.push(
         context,
         MaterialPageRoute(
           builder: (context) => ResultScreen(
             result: result,
             imageFile: imageFile,
+            onFirstFrameRendered: () {
+              stopwatch.stop();
+
+              debugPrint(
+                '========== TOTAL PROCESSING TIME ==========',
+              );
+              debugPrint(
+                'Total processing time: '
+                '${stopwatch.elapsedMilliseconds} ms',
+              );
+              debugPrint(
+                '============================================',
+              );
+            },
           ),
         ),
       );

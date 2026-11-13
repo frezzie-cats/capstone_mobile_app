@@ -7,11 +7,13 @@ import '../services/tflite_service.dart';
 class ResultScreen extends StatelessWidget {
   final TriageResult result;
   final File imageFile;
+  final VoidCallback? onFirstFrameRendered;
 
   const ResultScreen({
     super.key,
     required this.result,
     required this.imageFile,
+    this.onFirstFrameRendered,
   });
 
   static const Color primaryTeal = Color(0xFF087F78);
@@ -31,6 +33,11 @@ class ResultScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Notify the camera screen after the first frame is rendered.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      onFirstFrameRendered?.call();
+    });
+
     final bool isLesion = result.isLesionDetected;
 
     final Color statusColor = isLesion
