@@ -31,7 +31,6 @@ class _CameraScreenState extends State<CameraScreen>
   final TfliteService _tfliteService = TfliteService();
   final ImagePicker _imagePicker = ImagePicker();
 
-  // Initialization futures
   late Future<void> _cameraInitializationFuture;
   late Future<void> _modelsFuture;
 
@@ -45,6 +44,13 @@ class _CameraScreenState extends State<CameraScreen>
   bool _isReady = false;
   bool _isProcessing = false;
   String? _initializationError;
+
+  // --------------------------------------------------
+  // PERFORMANCE TESTING
+  // --------------------------------------------------
+
+  // Sequential counter for the 20-image performance test.
+  int _performanceImageCounter = 0;
 
   // --------------------------------------------------
   // INITIALIZATION
@@ -72,10 +78,8 @@ class _CameraScreenState extends State<CameraScreen>
     if (state == AppLifecycleState.inactive ||
         state == AppLifecycleState.paused ||
         state == AppLifecycleState.detached) {
-      // Release camera resources when the app is inactive.
       _releaseCamera();
     } else if (state == AppLifecycleState.resumed) {
-      // Reinitialize camera when the app returns.
       _initializeCameraAndModels();
     }
   }
@@ -265,17 +269,25 @@ class _CameraScreenState extends State<CameraScreen>
 
       if (!mounted) return;
 
-      // Step 3: Start measuring total processing time.
+      // Step 3: Assign a sequential image number.
+      final int imageNumber = ++_performanceImageCounter;
+
+      // Step 4: Start measuring total processing time.
       final stopwatch = Stopwatch()..start();
 
-      // Step 4: Process the image and generate the result.
+      debugPrint(
+        'PERF_START image=$imageNumber '
+        'timestamp=${DateTime.now().toIso8601String()}',
+      );
+
+      // Step 5: Process the image and generate the result.
       final result =
           await _tfliteService.processImage(imageFile);
 
       // Pause measurement to exclude artificial loading delay.
       stopwatch.stop();
 
-      // Step 5: Preserve the existing minimum loading duration.
+      // Step 6: Preserve the existing minimum loading duration.
       const minimumLoadingTime = Duration(seconds: 1);
 
       final remainingTime =
@@ -287,7 +299,7 @@ class _CameraScreenState extends State<CameraScreen>
 
       if (!mounted) return;
 
-      // Step 6: Hide the analyzing overlay.
+      // Step 7: Hide the analyzing overlay.
       setState(() {
         _isProcessing = false;
       });
@@ -295,7 +307,10 @@ class _CameraScreenState extends State<CameraScreen>
       // Resume measurement before navigating to the result screen.
       stopwatch.start();
 
-      // Step 7: Navigate to the result screen.
+      // Prevent duplicate completion logs if the result screen rebuilds.
+      bool measurementCompleted = false;
+
+      // Step 8: Navigate to the result screen.
       await Navigator.push(
         context,
         MaterialPageRoute(
@@ -303,15 +318,31 @@ class _CameraScreenState extends State<CameraScreen>
             result: result,
             imageFile: imageFile,
             onFirstFrameRendered: () {
+              if (measurementCompleted) return;
+
+              measurementCompleted = true;
+
               stopwatch.stop();
+
+              final endTimestamp =
+                  DateTime.now().toIso8601String();
+
+              final totalMilliseconds =
+                  stopwatch.elapsedMicroseconds / 1000.0;
+
+              debugPrint(
+                'PERF_END image=$imageNumber '
+                'timestamp=$endTimestamp '
+                'total_ms=${totalMilliseconds.toStringAsFixed(3)}',
+              );
 
               debugPrint(
                 '========== TOTAL PROCESSING TIME ==========',
               );
 
               debugPrint(
-                'Total processing time: '
-                '${stopwatch.elapsedMilliseconds} ms',
+                'Image $imageNumber: '
+                '${totalMilliseconds.toStringAsFixed(3)} ms',
               );
 
               debugPrint(
